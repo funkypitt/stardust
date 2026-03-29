@@ -1,77 +1,32 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="horizontal"
     android:background="#000000">
 
-    <!-- Game screen on the left -->
+    <!-- Game screen fills everything -->
     <ui.EmuView
         android:id="@+id/emu_view"
-        android:layout_width="0dp"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <!-- Fire button: left edge, vertically centered -->
+    <Button
+        android:id="@+id/btn_feu"
+        android:layout_width="56dp"
+        android:layout_height="72dp"
+        android:layout_gravity="left|center_vertical"
+        android:layout_marginLeft="4dp"
+        android:text="\uD83D\uDD25"
+        android:textSize="24sp"
+        android:background="@drawable/btn_c64_red"
+        android:hapticFeedbackEnabled="true" />
+
+    <!-- Right-side swipe zone: 3 stacked action bands, no gaps -->
+    <ui.ActionStripView
+        android:id="@+id/action_strip"
+        android:layout_width="100dp"
         android:layout_height="match_parent"
-        android:layout_weight="1" />
+        android:layout_gravity="right" />
 
-    <!-- Buttons on the right -->
-    <LinearLayout
-        android:layout_width="96dp"
-        android:layout_height="match_parent"
-        android:orientation="vertical"
-        android:gravity="center_vertical"
-        android:paddingTop="8dp"
-        android:paddingBottom="8dp"
-        android:paddingLeft="6dp"
-        android:paddingRight="6dp">
-
-        <!-- FEU (Fire) - small button at top -->
-        <Button
-            android:id="@+id/btn_feu"
-            android:layout_width="match_parent"
-            android:layout_height="56dp"
-            android:layout_marginBottom="8dp"
-            android:text="\uD83D\uDD25"
-            android:textSize="22sp"
-            android:background="@drawable/btn_c64_red"
-            android:hapticFeedbackEnabled="true" />
-
-        <!-- SAUTER (Jump/Up) - big tile -->
-        <Button
-            android:id="@+id/btn_sauter"
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1"
-            android:layout_marginBottom="6dp"
-            android:text="\u2B06"
-            android:textSize="28sp"
-            android:textColor="#FFFFFF"
-            android:background="@drawable/btn_c64_green"
-            android:hapticFeedbackEnabled="true" />
-
-        <!-- TRAVERSER (Right) - big tile -->
-        <Button
-            android:id="@+id/btn_traverser"
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1"
-            android:layout_marginBottom="6dp"
-            android:text="\u27A1"
-            android:textSize="28sp"
-            android:textColor="#FFFFFF"
-            android:background="@drawable/btn_c64_purple"
-            android:hapticFeedbackEnabled="true" />
-
-        <!-- GLISSER (Slide/Down) - big tile -->
-        <Button
-            android:id="@+id/btn_glisser"
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1"
-            android:text="\u2B07"
-            android:textSize="28sp"
-            android:textColor="#FFFFFF"
-            android:background="@drawable/btn_c64_blue"
-            android:hapticFeedbackEnabled="true" />
-
-    </LinearLayout>
-
-</LinearLayout>
+</FrameLayout>
