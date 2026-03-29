@@ -9,8 +9,6 @@ import util.Logger;
 
 import android.content.Context;
 import android.content.res.AssetManager;
-import android.os.Handler;
-import android.os.Looper;
 import android.util.Log;
 
 import java.io.InputStream;
@@ -35,7 +33,7 @@ public class Control {
     private Thread emuThread;
 
     private final Object emuLock = new Object();
-    private NativeInterface emu;
+    private volatile NativeInterface emu;
 
     private Object[] videoBuffers = new Object[NUM_VIDEO_BUFFERS];
     private int videoBufferIndex;
@@ -50,9 +48,13 @@ public class Control {
 
     private int stickMask = 0x0;
 
-    private static Control globalInstance = null;
+    private static volatile Control globalInstance = null;
 
     private AudioControl audioControl = new AudioControl();
+
+    // Pending disk load from assets
+    private volatile byte[] pendingDiskData;
+    private volatile String pendingDiskFilename;
 
     public static Control instance() {
         return globalInstance;
@@ -63,7 +65,6 @@ public class Control {
     }
 
     public void init() {
-        // Always use 32bpp (no texture compression)
         int videoBufferSize = DISPLAY_PIXELS * 4;
 
         for (int i = 0; i < NUM_VIDEO_BUFFERS; i++) {
@@ -124,6 +125,24 @@ public class Control {
         audioControl.pause();
 
         while (running && !Thread.interrupted()) {
+
+            // Check for pending disk load (from main thread)
+            if (pendingDiskData != null) {
+                byte[] diskData = pendingDiskData;
+                String diskFilename = pendingDiskFilename;
+                pendingDiskData = null;
+                pendingDiskFilename = null;
+
+                synchronized (emuLock) {
+                    int status = emu.load(Image.TYPE_DISK, diskData, diskData.length, diskFilename);
+                    if (status != 0) {
+                        logger.warning("failed to attach disk");
+                    } else {
+                        logger.info("disk attached: " + diskFilename);
+                    }
+                }
+                keyboardInputDelay = 50;
+            }
 
             if (paused) {
 
@@ -224,7 +243,7 @@ public class Control {
 
         if (null != emuThread) {
             try {
-                emuThread.join();
+                emuThread.join(3000);
             } catch (InterruptedException e) {
                 ;
             }
@@ -235,12 +254,10 @@ public class Control {
 
     public synchronized void pause() {
         paused = true;
-        logger.info("paused emulator");
     }
 
     public synchronized void resume() {
         paused = false;
-        logger.info("resumed emulator");
     }
 
     public boolean isPaused() {
@@ -293,7 +310,11 @@ public class Control {
         }
     }
 
-    public boolean attachDiskFromAssets(Context context, String assetFilename) {
+    /**
+     * Load a D64 disk image from assets and queue it for the emu thread.
+     * Safe to call from any thread.
+     */
+    public boolean loadDiskFromAssets(Context context, String assetFilename) {
         try {
             AssetManager assetManager = context.getAssets();
             InputStream is = assetManager.open(assetFilename);
@@ -305,18 +326,11 @@ public class Control {
             }
             is.close();
             byte[] data = baos.toByteArray();
+            logger.info("loaded disk from assets: " + data.length + " bytes");
 
-            int status = 0;
-            synchronized (emuLock) {
-                status = emu.load(Image.TYPE_DISK, data, data.length, assetFilename);
-            }
-
-            if (0 != status) {
-                logger.warning("failed to attach disk from assets");
-                return false;
-            }
-
-            keyboardInputDelay = 50;
+            // Queue for emu thread to process
+            pendingDiskFilename = assetFilename;
+            pendingDiskData = data;
             return true;
 
         } catch (Exception e) {
@@ -325,17 +339,16 @@ public class Control {
         }
     }
 
+    /**
+     * Load disk and auto-type LOAD"*",8,1 + RUN after C64 boot delay.
+     */
     public void autoStartGame(final Context context) {
-        final Handler handler = new Handler(Looper.getMainLooper());
+        // Load disk data from assets on main thread (just file I/O, no JNI)
+        loadDiskFromAssets(context, "We Are Stardust (M).d64");
 
-        // Wait 3 seconds for C64 boot, then attach disk and type LOAD command
-        handler.postDelayed(new Runnable() {
-            @Override
-            public void run() {
-                attachDiskFromAssets(context, "We Are Stardust (M).d64");
-                keyInput(KeySequence.sequence_Load_Asterisk_8_1_Run);
-            }
-        }, 3000);
+        // Queue the key sequence - it will wait for keyboardInputDelay (set by disk attach)
+        // then type LOAD"*",8,1 + RUN
+        keyInput(KeySequence.sequence_Load_Asterisk_8_1_Run);
     }
 
     public byte[] lockTextureData() {
@@ -344,11 +357,6 @@ public class Control {
         }
 
         byte[] buffer = (byte[]) videoBuffers[textureBufferIndex];
-
-        if (null == buffer) {
-            logger.warning("lock texture data: buffer is NULL");
-        }
-
         return buffer;
     }
 
@@ -357,17 +365,15 @@ public class Control {
     }
 
     public void setStick(int stickMask) {
-        if (this.stickMask != stickMask) {
-            this.stickMask = stickMask;
-        }
+        this.stickMask = stickMask;
     }
 
     public void setStickFlag(int flag) {
-        setStick(this.stickMask | flag);
+        this.stickMask |= flag;
     }
 
     public void clearStickFlag(int flag) {
-        setStick(this.stickMask & (~flag));
+        this.stickMask &= ~flag;
     }
 
     public int getStick() {

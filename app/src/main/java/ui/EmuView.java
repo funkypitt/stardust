@@ -61,13 +61,19 @@ public class EmuView extends SurfaceView implements SurfaceHolder.Callback, Runn
     public void surfaceCreated(SurfaceHolder holder) {
         viewDestroyed = false;
         startRendering();
-        Control.instance().resume();
+        Control ctrl = Control.instance();
+        if (ctrl != null) {
+            ctrl.resume();
+        }
     }
 
     @Override
     public void surfaceDestroyed(SurfaceHolder holder) {
         viewDestroyed = true;
-        Control.instance().pause();
+        Control ctrl = Control.instance();
+        if (ctrl != null) {
+            ctrl.pause();
+        }
         stopRendering();
     }
 
@@ -81,6 +87,11 @@ public class EmuView extends SurfaceView implements SurfaceHolder.Callback, Runn
         renderingEnabled = false;
         if (null != renderThread) {
             renderThread.interrupt();
+            try {
+                renderThread.join(1000);
+            } catch (InterruptedException e) {
+                ;
+            }
             renderThread = null;
         }
     }
@@ -91,17 +102,25 @@ public class EmuView extends SurfaceView implements SurfaceHolder.Callback, Runn
 
         while (!Thread.interrupted() && !viewDestroyed) {
             if (renderingEnabled) {
-                canvas = surfaceHolder.lockCanvas(null);
-                if (null != canvas) {
-                    doRendering(canvas);
-                    surfaceHolder.unlockCanvasAndPost(canvas);
+                try {
+                    canvas = surfaceHolder.lockCanvas(null);
+                    if (null != canvas) {
+                        doRendering(canvas);
+                        surfaceHolder.unlockCanvasAndPost(canvas);
+                    }
+                } catch (Exception e) {
+                    // Surface may have been destroyed
+                    break;
                 }
             }
         }
     }
 
     private void updateBitmap() {
-        byte[] rawData = Control.instance().lockTextureData();
+        Control ctrl = Control.instance();
+        if (ctrl == null) return;
+
+        byte[] rawData = ctrl.lockTextureData();
         if (null == rawData) {
             return;
         }
@@ -112,7 +131,7 @@ public class EmuView extends SurfaceView implements SurfaceHolder.Callback, Runn
         bitmap.copyPixelsFromBuffer(buffer);
         bitmapReady = true;
 
-        Control.instance().unlockTextureData();
+        ctrl.unlockTextureData();
     }
 
     private void doRendering(Canvas canvas) {

@@ -6,6 +6,7 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
 
+import com.stardust.app.R;
 import emu.Control;
 import emu.KeyCode;
 
@@ -20,21 +21,23 @@ public class StardustActivity extends Activity {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN
                 | WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
-        setContentView(getResources().getIdentifier("activity_stardust", "layout", getPackageName()));
+        // Initialize emulator BEFORE inflating layout
+        // (EmuView surface callbacks call Control.instance())
+        control = new Control();
+        control.init();
+
+        setContentView(R.layout.activity_stardust);
 
         hideSystemUI();
 
-        // Initialize emulator
-        control = new Control();
-        control.init();
+        // Start emulator after layout is set
         control.start();
 
         // Auto-start game
         control.autoStartGame(this);
 
-        // Fire button (left side) - separate from the action strip
-        View fireBtn = findViewById(getResources().getIdentifier("btn_feu", "id", getPackageName()));
-        fireBtn.setOnTouchListener(new View.OnTouchListener() {
+        // Fire button (left side)
+        findViewById(R.id.btn_feu).setOnTouchListener(new View.OnTouchListener() {
             @Override
             public boolean onTouch(View v, MotionEvent event) {
                 switch (event.getAction()) {
@@ -49,8 +52,6 @@ public class StardustActivity extends Activity {
                 return false;
             }
         });
-
-        // ActionStripView handles the 3 directional actions internally
     }
 
     private void hideSystemUI() {
