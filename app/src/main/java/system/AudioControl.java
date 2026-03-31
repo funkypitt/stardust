@@ -71,7 +71,7 @@ public class AudioControl {
             audioReverb = new PresetReverb(0, audioTrack.getAudioSessionId());
             audioReverb.setPreset(PresetReverb.PRESET_LARGEHALL);
             audioReverb.setEnabled(false);
-        } catch (IllegalArgumentException e) {
+        } catch (Exception e) {
             audioReverb = null;
         }
 

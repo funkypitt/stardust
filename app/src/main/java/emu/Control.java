@@ -52,9 +52,10 @@ public class Control {
 
     private AudioControl audioControl = new AudioControl();
 
-    // Pending disk load from assets
+    // Pending autostart: disk data + key sequence, applied by emu thread after init
     private volatile byte[] pendingDiskData;
     private volatile String pendingDiskFilename;
+    private volatile int[] pendingKeySequence;
 
     public static Control instance() {
         return globalInstance;
@@ -75,7 +76,7 @@ public class Control {
     }
 
     public synchronized void start() {
-        logger.info("starting emulator");
+        dbg("Control.start()");
 
         if (running) return;
 
@@ -95,138 +96,161 @@ public class Control {
     }
 
     private void emuLoop() {
-        logger.info("started emulator process");
+        dbg("[emu] emuLoop started");
 
-        if (!Thread.interrupted()) {
-            emu = new NativeInterface();
+        try {
+            if (!Thread.interrupted()) {
+                dbg("[emu] loading native lib...");
+                emu = new NativeInterface();
+                dbg("[emu] NativeInterface created");
 
-            Log.d("emu", "initializing emulator kernel");
+                StringBuilder prefsDocument = new StringBuilder();
+                prefsDocument.append("Emul1541Proc = FALSE\n");
+                prefsDocument.append("JoystickSwap = FALSE\n");
 
-            StringBuilder prefsDocument = new StringBuilder();
-            prefsDocument.append("Emul1541Proc = FALSE\n");
-            prefsDocument.append("JoystickSwap = FALSE\n");
+                dbg("[emu] calling emu.init...");
+                if (0 != emu.init(prefsDocument.toString(), 0x0)) {
+                    dbg("[emu] ERROR: emu.init failed!");
+                    return;
+                }
 
-            if (0 != emu.init(prefsDocument.toString(), 0x0)) {
-                Log.e("emu", "failed to initialize emulator kernel");
-                return;
+                dbg("[emu] kernel initialized OK");
             }
 
-            logger.info("initialized emulator kernel");
-        }
+            clearKeyboardInputQueue();
 
-        clearKeyboardInputQueue();
+            long nextUpdateTime = 0;
+            long cycleTime = (long) NORMAL_SLEEP_TIME * 1000000;
 
-        long nextUpdateTime = 0;
-        long cycleTime = (long) NORMAL_SLEEP_TIME * 1000000;
+            boolean vblankOccured = false;
 
-        boolean vblankOccured = false;
+            audioControl.start();
+            audioControl.pause();
 
-        audioControl.start();
-        audioControl.pause();
+            dbg("[emu] entering main loop, pendingDisk=" + (pendingDiskData != null));
 
-        while (running && !Thread.interrupted()) {
+            // Wait a bit for C64 to boot before processing pending disk
+            int bootDelay = 150; // 3 seconds at 50Hz
 
-            // Check for pending disk load (from main thread)
-            if (pendingDiskData != null) {
-                byte[] diskData = pendingDiskData;
-                String diskFilename = pendingDiskFilename;
-                pendingDiskData = null;
-                pendingDiskFilename = null;
+            while (running && !Thread.interrupted()) {
 
-                synchronized (emuLock) {
-                    int status = emu.load(Image.TYPE_DISK, diskData, diskData.length, diskFilename);
-                    if (status != 0) {
-                        logger.warning("failed to attach disk");
-                    } else {
-                        logger.info("disk attached: " + diskFilename);
+                // After boot delay, check for pending disk + key sequence
+                if (bootDelay > 0) {
+                    if (vblankOccured) bootDelay--;
+
+                    if (bootDelay == 0 && pendingDiskData != null) {
+                        byte[] diskData = pendingDiskData;
+                        String diskFilename = pendingDiskFilename;
+                        int[] keySeq = pendingKeySequence;
+                        pendingDiskData = null;
+                        pendingDiskFilename = null;
+                        pendingKeySequence = null;
+
+                        dbg("[emu] attaching disk: " + diskFilename + " (" + diskData.length + " bytes)");
+                        synchronized (emuLock) {
+                            int status = emu.load(Image.TYPE_DISK, diskData, diskData.length, diskFilename);
+                            dbg("[emu] disk load status=" + status);
+                        }
+                        keyboardInputDelay = 50; // wait 1s after disk attach
+
+                        if (keySeq != null) {
+                            dbg("[emu] queuing " + keySeq.length + " key events");
+                            for (int keyCode : keySeq) {
+                                pushKeyboardInputQueue(keyCode);
+                            }
+                        }
                     }
                 }
-                keyboardInputDelay = 50;
-            }
 
-            if (paused) {
+                if (paused) {
 
-                audioControl.pause();
+                    audioControl.pause();
 
-                while (running && paused && !Thread.interrupted()) {
-                    try {
-                        Thread.sleep(PAUSE_SLEEP_TIME);
-                    } catch (InterruptedException e) {
-                        break;
-                    }
-                }
-
-                if (Thread.interrupted()) {
-                    break;
-                }
-
-                audioControl.reset();
-
-            } else {
-
-                if (vblankOccured) {
-
-                    processKeyboardInputQueue();
-
-                    long currentTime = System.nanoTime();
-
-                    if (currentTime < nextUpdateTime) {
-                        long waitTime = (nextUpdateTime - currentTime);
+                    while (running && paused && !Thread.interrupted()) {
                         try {
-                            Thread.sleep((long) (waitTime / 1000000));
+                            Thread.sleep(PAUSE_SLEEP_TIME);
                         } catch (InterruptedException e) {
                             break;
                         }
                     }
 
-                    if (0 == nextUpdateTime) {
-                        nextUpdateTime = currentTime + cycleTime;
-                    } else {
-                        nextUpdateTime += cycleTime;
-                        if (nextUpdateTime < currentTime - cycleTime * 2) {
-                            nextUpdateTime = currentTime - cycleTime * 2;
+                    if (Thread.interrupted()) {
+                        break;
+                    }
+
+                    audioControl.reset();
+
+                } else {
+
+                    if (vblankOccured) {
+
+                        processKeyboardInputQueue();
+
+                        long currentTime = System.nanoTime();
+
+                        if (currentTime < nextUpdateTime) {
+                            long waitTime = (nextUpdateTime - currentTime);
+                            try {
+                                Thread.sleep((long) (waitTime / 1000000));
+                            } catch (InterruptedException e) {
+                                break;
+                            }
+                        }
+
+                        if (0 == nextUpdateTime) {
+                            nextUpdateTime = currentTime + cycleTime;
+                        } else {
+                            nextUpdateTime += cycleTime;
+                            if (nextUpdateTime < currentTime - cycleTime * 2) {
+                                nextUpdateTime = currentTime - cycleTime * 2;
+                            }
                         }
                     }
-                }
 
-                byte[] videoBuffer = (byte[]) videoBuffers[videoBufferIndex];
-                byte[] audioBuffer = audioControl.getInputBuffer();
+                    byte[] videoBuffer = (byte[]) videoBuffers[videoBufferIndex];
+                    byte[] audioBuffer = audioControl.getInputBuffer();
 
-                int flags = FLAG_UNPACK_GRAPHICS | FLAG_USE_GAMMA_CORRECTION;
+                    int flags = FLAG_UNPACK_GRAPHICS | FLAG_USE_GAMMA_CORRECTION;
 
-                int updateStatus = 0;
+                    int updateStatus = 0;
 
-                synchronized (emuLock) {
-                    updateStatus = emu.update(stickMask, videoBuffer, audioBuffer, flags);
-                }
-
-                vblankOccured = (1 == updateStatus);
-
-                if (vblankOccured) {
-
-                    if (false == textureBufferFilled) {
-                        textureBufferIndex = videoBufferIndex;
-                        videoBufferIndex = (videoBufferIndex + 1) % NUM_VIDEO_BUFFERS;
-                        textureBufferFilled = true;
+                    synchronized (emuLock) {
+                        updateStatus = emu.update(stickMask, videoBuffer, audioBuffer, flags);
                     }
 
-                    audioControl.nextInputBuffer();
+                    vblankOccured = (1 == updateStatus);
+
+                    if (vblankOccured) {
+
+                        if (false == textureBufferFilled) {
+                            textureBufferIndex = videoBufferIndex;
+                            videoBufferIndex = (videoBufferIndex + 1) % NUM_VIDEO_BUFFERS;
+                            textureBufferFilled = true;
+                        }
+
+                        audioControl.nextInputBuffer();
+                    }
                 }
             }
+
+            audioControl.cleanup();
+
+            dbg("[emu] shutting down...");
+
+            clearKeyboardInputQueue();
+
+            emu.shutdown();
+            emu = null;
+
+            running = false;
+
+            dbg("[emu] finished");
+
+        } catch (Throwable t) {
+            java.io.StringWriter sw = new java.io.StringWriter();
+            t.printStackTrace(new java.io.PrintWriter(sw));
+            dbg("[emu] CRASH: " + sw.toString());
         }
-
-        audioControl.cleanup();
-
-        logger.info("shutdown emulator");
-
-        clearKeyboardInputQueue();
-
-        emu.shutdown();
-        emu = null;
-
-        running = false;
-
-        logger.info("finished emulator process");
     }
 
     public synchronized void stop() {
@@ -248,7 +272,6 @@ public class Control {
                 ;
             }
             emuThread = null;
-            logger.info("stopped emulator");
         }
     }
 
@@ -262,10 +285,6 @@ public class Control {
 
     public boolean isPaused() {
         return paused;
-    }
-
-    public void keyInputDelay(int delayCycles) {
-        keyboardInputDelay += delayCycles;
     }
 
     public void keyInput(int keyCode) {
@@ -300,24 +319,15 @@ public class Control {
         }
     }
 
-    private void sendCommand(int command) {
-        if (null == emu) {
-            return;
-        }
-
-        synchronized (emuLock) {
-            emu.command(command);
-        }
-    }
-
     /**
-     * Load a D64 disk image from assets and queue it for the emu thread.
-     * Safe to call from any thread.
+     * Prepare auto-start: load D64 data from assets and store the key sequence.
+     * Both will be applied by the emu thread after boot delay.
      */
-    public boolean loadDiskFromAssets(Context context, String assetFilename) {
+    public void autoStartGame(Context context) {
         try {
+            dbg("[autostart] loading D64 from assets...");
             AssetManager assetManager = context.getAssets();
-            InputStream is = assetManager.open(assetFilename);
+            InputStream is = assetManager.open("We Are Stardust (M).d64");
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
             byte[] buf = new byte[8192];
             int len;
@@ -326,29 +336,17 @@ public class Control {
             }
             is.close();
             byte[] data = baos.toByteArray();
-            logger.info("loaded disk from assets: " + data.length + " bytes");
+            dbg("[autostart] D64 loaded: " + data.length + " bytes");
 
-            // Queue for emu thread to process
-            pendingDiskFilename = assetFilename;
-            pendingDiskData = data;
-            return true;
+            // Store for emu thread to pick up after boot
+            pendingKeySequence = KeySequence.sequence_Load_Asterisk_8_1_Run;
+            pendingDiskFilename = "We Are Stardust (M).d64";
+            pendingDiskData = data; // set last (volatile flag)
+            dbg("[autostart] queued for emu thread");
 
         } catch (Exception e) {
-            logger.error("failed to load disk from assets: " + e.getMessage());
-            return false;
+            dbg("[autostart] ERROR: " + e.getMessage());
         }
-    }
-
-    /**
-     * Load disk and auto-type LOAD"*",8,1 + RUN after C64 boot delay.
-     */
-    public void autoStartGame(final Context context) {
-        // Load disk data from assets on main thread (just file I/O, no JNI)
-        loadDiskFromAssets(context, "We Are Stardust (M).d64");
-
-        // Queue the key sequence - it will wait for keyboardInputDelay (set by disk attach)
-        // then type LOAD"*",8,1 + RUN
-        keyInput(KeySequence.sequence_Load_Asterisk_8_1_Run);
     }
 
     public byte[] lockTextureData() {
@@ -356,8 +354,7 @@ public class Control {
             return null;
         }
 
-        byte[] buffer = (byte[]) videoBuffers[textureBufferIndex];
-        return buffer;
+        return (byte[]) videoBuffers[textureBufferIndex];
     }
 
     public void unlockTextureData() {
@@ -378,5 +375,9 @@ public class Control {
 
     public int getStick() {
         return this.stickMask;
+    }
+
+    private static void dbg(String msg) {
+        ui.StardustActivity.log(msg);
     }
 }

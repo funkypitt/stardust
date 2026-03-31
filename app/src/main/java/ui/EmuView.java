@@ -9,16 +9,20 @@ import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Rect;
 import android.util.AttributeSet;
+import android.view.MotionEvent;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 
 import emu.Control;
+import emu.KeyCode;
 import util.LogManager;
 import util.Logger;
 
 public class EmuView extends SurfaceView implements SurfaceHolder.Callback, Runnable {
 
     private final static Logger logger = LogManager.getLogger(EmuView.class.getName());
+
+    private static final float SWIPE_THRESHOLD = 30f;
 
     private volatile boolean renderingEnabled;
     private SurfaceHolder surfaceHolder;
@@ -27,6 +31,9 @@ public class EmuView extends SurfaceView implements SurfaceHolder.Callback, Runn
     private Paint bitmapPaint;
     private Bitmap bitmap;
     private boolean bitmapReady;
+
+    private float touchStartX, touchStartY;
+    private int activeGestureFlag = 0;
 
     private Rect renderRect = new Rect(0, 0, 0, 0);
     private Rect bitmapSourceRect = new Rect(0, 0, Control.DISPLAY_X, Control.DISPLAY_Y);
@@ -97,6 +104,53 @@ public class EmuView extends SurfaceView implements SurfaceHolder.Callback, Runn
     }
 
     @Override
+    public boolean onTouchEvent(MotionEvent event) {
+        Control ctrl = Control.instance();
+        if (ctrl == null) return false;
+
+        switch (event.getAction()) {
+            case MotionEvent.ACTION_DOWN:
+                touchStartX = event.getX();
+                touchStartY = event.getY();
+                activeGestureFlag = 0;
+                return true;
+
+            case MotionEvent.ACTION_MOVE:
+                float dx = event.getX() - touchStartX;
+                float dy = event.getY() - touchStartY;
+                float absDx = Math.abs(dx);
+                float absDy = Math.abs(dy);
+
+                int newFlag = 0;
+                if (absDx > SWIPE_THRESHOLD || absDy > SWIPE_THRESHOLD) {
+                    if (dx > absDy) {
+                        newFlag = KeyCode.C64STICK_RIGHT;  // swipe right = traverse
+                    } else if (-dy > absDx) {
+                        newFlag = KeyCode.C64STICK_UP;     // swipe up = jump
+                    } else if (dy > absDx) {
+                        newFlag = KeyCode.C64STICK_DOWN;   // swipe down = slide
+                    }
+                }
+
+                if (newFlag != activeGestureFlag) {
+                    if (activeGestureFlag != 0) ctrl.clearStickFlag(activeGestureFlag);
+                    if (newFlag != 0) ctrl.setStickFlag(newFlag);
+                    activeGestureFlag = newFlag;
+                }
+                return true;
+
+            case MotionEvent.ACTION_UP:
+            case MotionEvent.ACTION_CANCEL:
+                if (activeGestureFlag != 0) {
+                    ctrl.clearStickFlag(activeGestureFlag);
+                    activeGestureFlag = 0;
+                }
+                return true;
+        }
+        return false;
+    }
+
+    @Override
     public void run() {
         Canvas canvas;
 
@@ -158,13 +212,20 @@ public class EmuView extends SurfaceView implements SurfaceHolder.Callback, Runn
     }
 
     private static Rect matchSize(int width, int height) {
-        int zoomFactor = Math.min(width / (Control.DISPLAY_X - 44),
-                height / (Control.DISPLAY_Y - 80));
-        if (zoomFactor < 1) zoomFactor = 1;
-        else if (zoomFactor > 32) zoomFactor = 32;
+        // C64 output was displayed on 4:3 monitors
+        float targetAspect = 4f / 3f;
 
-        int outW = Control.DISPLAY_X * zoomFactor;
-        int outH = Control.DISPLAY_Y * zoomFactor;
+        int outW, outH;
+        if ((float) width / height > targetAspect) {
+            // Screen is wider than 4:3 — fit to height
+            outH = height;
+            outW = (int) (height * targetAspect);
+        } else {
+            // Screen is taller than 4:3 — fit to width
+            outW = width;
+            outH = (int) (width / targetAspect);
+        }
+
         int outX = (width - outW) / 2;
         int outY = (height - outH) / 2;
 

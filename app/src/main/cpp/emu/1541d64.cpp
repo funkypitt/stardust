@@ -292,7 +292,7 @@ bool D64Drive::find_file(char *filename, int *track, int *sector)
 			*track = de->track;
 			*sector = de->sector;
 
-			if (de->type) {
+			if (de->type & 0x07) {  // Skip DEL entries (type 0), match PRG/SEQ/USR/REL only
 				p = (uint8 *)filename;
 				q = de->name;
 				for (i=0; i<16 && *p; i++, p++, q++) {
