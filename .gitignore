@@ -21,3 +21,4 @@ obj/
 .project
 .settings/
 proguard/
+*.jpg
