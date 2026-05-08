@@ -1,0 +1,26 @@
+[en]
+"We Are Stardust" — Commodore 64 release in a stand-alone Android app.
+
+A single-purpose Android app that ships an embedded Commodore 64 emulator (Frodo by Christian Bauer) pre-configured to autoload the "We Are Stardust" disk image. Open the app, the C64 boots, the disk runs — no ROM picking, no menus, no setup.
+
+The emulator core is bundled as a native NDK component (armeabi-v7a, arm64-v8a, x86, x86_64). The Java side adds a fullscreen landscape activity, on-screen touch input, and an action strip for emulator commands.
+
+- Embedded C64 emulator (Frodo)
+- Autoloads "We Are Stardust (M).d64" on launch
+- Fullscreen landscape with touch controls
+- Native cores for arm/x86, 32-bit and 64-bit
+- No external files or ROMs to manage
+
+---
+[fr]
+« We Are Stardust » — la production Commodore 64, en app Android autonome.
+
+Une application Android mono-usage qui embarque un émulateur Commodore 64 (Frodo, par Christian Bauer) pré-configuré pour charger automatiquement la disquette « We Are Stardust ». Vous lancez l'app, le C64 démarre, la disquette tourne — pas de ROM à choisir, pas de menus, pas de configuration.
+
+Le cœur de l'émulateur est inclus comme composant natif NDK (armeabi-v7a, arm64-v8a, x86, x86_64). Le côté Java ajoute une activité plein écran en paysage, des contrôles tactiles à l'écran et une barre d'actions pour les commandes de l'émulateur.
+
+- Émulateur C64 embarqué (Frodo)
+- Charge automatiquement « We Are Stardust (M).d64 » au démarrage
+- Plein écran paysage, commandes tactiles
+- Cœurs natifs arm/x86, 32 et 64 bits
+- Aucun fichier ni ROM externe à gérer
